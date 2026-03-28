@@ -31,6 +31,20 @@ canvas{display:block;width:100%;flex:0 0 55%;background:#1a1a3e;touch-action:non
 .hpBar .lbl{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;text-shadow:0 1px 2px #000}
 #autoBtn{position:absolute;top:50px;right:10px;z-index:10;padding:3px 8px;border-radius:10px;font-size:10px;cursor:pointer;border:1px solid #4af;background:rgba(68,170,255,.15);color:#4af}
 #autoBtn.off{border-color:#555;background:rgba(80,80,80,.15);color:#666}
+#loginScreen{position:fixed;inset:0;background:linear-gradient(135deg,#0a0a2e,#1a0a3e,#0a1a3e);z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+#loginScreen h1{color:#ffd700;font-size:28px;text-shadow:0 0 20px rgba(255,215,0,.5)}
+#loginScreen .subtitle{color:#888;font-size:13px;margin-top:-10px}
+#loginBtn{display:flex;align-items:center;gap:10px;padding:12px 28px;border:2px solid #4285f4;border-radius:12px;background:rgba(66,133,244,.15);color:#fff;font-size:15px;cursor:pointer;transition:.2s;min-height:48px}
+#loginBtn:hover{background:rgba(66,133,244,.3);transform:scale(1.02)}
+#loginBtn svg{width:20px;height:20px}
+#guestBtn{padding:10px 24px;border:1px solid #555;border-radius:10px;background:transparent;color:#888;font-size:13px;cursor:pointer;transition:.2s}
+#guestBtn:hover{color:#aaa;border-color:#888}
+#loginError{color:#f44;font-size:12px;display:none}
+.userInfo{display:flex;align-items:center;gap:8px;padding:8px;background:#1a1a4a;border-radius:8px;margin-bottom:8px}
+.userInfo img{width:28px;height:28px;border-radius:50%;border:1px solid #ffd700}
+.userInfo .uname{font-size:12px;color:#ffd700}
+.userInfo .uemail{font-size:10px;color:#888}
+.cloudSync{font-size:10px;color:#4af;margin-top:2px}
 #killProg{position:absolute;top:52px;left:50%;transform:translateX(-50%);z-index:10;font-size:9px;color:#aaa}
 .urow{display:flex;align-items:center;padding:7px;margin:3px 0;background:#16163a;border-radius:8px;border:1px solid #2a2a50}
 .urow:active{background:#1e1e45}
@@ -77,9 +91,23 @@ canvas{display:block;width:100%;flex:0 0 55%;background:#1a1a3e;touch-action:non
 #gachaOverlay{display:none;position:absolute;inset:0;z-index:50;background:rgba(0,0,0,.85);pointer-events:none}
 ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
 </style>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
-<div id="gameContainer">
+<div id="loginScreen">
+  <h1>⚔️ Soul Blaze</h1>
+  <div class="subtitle">방치형 액션 RPG</div>
+  <button id="loginBtn" onclick="googleLogin()">
+    <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+    Google로 로그인
+  </button>
+  <button id="guestBtn" onclick="guestLogin()">게스트로 시작 (저장 안됨)</button>
+  <div id="loginError"></div>
+</div>
+<div id="gameContainer" style="display:none">
   <canvas id="c"></canvas>
   <canvas id="gachaOverlay"></canvas>
   <div id="hud">
@@ -122,6 +150,109 @@ canvas{display:block;width:100%;flex:0 0 55%;background:#1a1a3e;touch-action:non
 </div>
 
 <script>
+// ============================================
+// FIREBASE CONFIG & AUTH
+// ============================================
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+let fbApp=null, fbAuth=null, fbDb=null, currentUser=null, isGuest=false;
+
+try{
+  fbApp=firebase.initializeApp(firebaseConfig);
+  fbAuth=firebase.auth();
+  fbDb=firebase.firestore();
+}catch(e){console.warn('Firebase init failed:',e)}
+
+async function googleLogin(){
+  let errEl=document.getElementById('loginError');
+  errEl.style.display='none';
+  try{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    const result=await fbAuth.signInWithPopup(provider);
+    currentUser=result.user;
+    isGuest=false;
+    await cloudLoad();
+    startGame();
+  }catch(e){
+    console.error('Login error:',e);
+    errEl.textContent='로그인 실패: '+e.message;
+    errEl.style.display='block';
+  }
+}
+
+function guestLogin(){
+  currentUser=null;
+  isGuest=true;
+  startGame();
+}
+
+function startGame(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('gameContainer').style.display='flex';
+  resize();
+  load();checkIdle();recalcStats();G.p.hp=G.p.mhp;
+  let today=new Date().toDateString();
+  if(G.quests.date!==today){G.quests={kills:0,trains:0,dungeon:0,date:today};G.questsClaimed={}}
+  let ab=document.getElementById('autoBtn');
+  ab.textContent=G.auto?'AUTO':'MANUAL';
+  ab.classList.toggle('off',!G.auto);
+  rTrain();
+  requestAnimationFrame(loop);
+  setInterval(periodicRefresh,500);
+}
+
+async function cloudSave(){
+  if(!currentUser||!fbDb||isGuest)return;
+  try{
+    let data=localStorage.getItem('sb3');
+    if(data){
+      await fbDb.collection('saves').doc(currentUser.uid).set({
+        data:data,
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+        displayName:currentUser.displayName||'',
+        email:currentUser.email||''
+      });
+    }
+  }catch(e){console.error('Cloud save error:',e)}
+}
+
+async function cloudLoad(){
+  if(!currentUser||!fbDb||isGuest)return;
+  try{
+    let doc=await fbDb.collection('saves').doc(currentUser.uid).get();
+    if(doc.exists){
+      let cloudData=doc.data().data;
+      let localData=localStorage.getItem('sb3');
+      let localTime=parseInt(localStorage.getItem('sb3_t')||'0');
+      let cloudTime=doc.data().updatedAt?doc.data().updatedAt.toMillis():0;
+      // Use whichever is newer
+      if(cloudTime>localTime && cloudData){
+        localStorage.setItem('sb3',cloudData);
+        localStorage.setItem('sb3_t',cloudTime+'');
+      }
+    }
+  }catch(e){console.error('Cloud load error:',e)}
+}
+
+async function logout(){
+  try{
+    save();
+    await cloudSave();
+    if(fbAuth)await fbAuth.signOut();
+    currentUser=null;
+    isGuest=false;
+    document.getElementById('gameContainer').style.display='none';
+    document.getElementById('loginScreen').style.display='flex';
+  }catch(e){console.error('Logout error:',e)}
+}
+
 // ============================================
 // CANVAS & CORE
 // ============================================
@@ -230,9 +361,9 @@ let G={
   fx:[],dmg:[],proj:[],
 
   tr:{
-    atk:{lv:0,g:3,cost:10,cm:1.15,ic:'ATK',nm:'공격력',ds:'+{v} 공격력'},
-    hp:{lv:0,g:30,cost:10,cm:1.15,ic:'HP',nm:'체력',ds:'+{v} HP'},
-    def:{lv:0,g:1,cost:15,cm:1.18,ic:'DEF',nm:'방어력',ds:'+{v} 방어력'},
+    atk:{lv:0,g:5,cost:10,cm:1.18,ic:'ATK',nm:'공격력',ds:'+{v} 공격력'},
+    hp:{lv:0,g:40,cost:10,cm:1.18,ic:'HP',nm:'체력',ds:'+{v} HP'},
+    def:{lv:0,g:2,cost:15,cm:1.2,ic:'DEF',nm:'방어력',ds:'+{v} 방어력'},
     cr:{lv:0,g:.01,cost:50,cm:1.25,ic:'CRT',nm:'치명타',ds:'+1% 치명타'},
     cdm:{lv:0,g:.05,cost:50,cm:1.25,ic:'CDM',nm:'치명피해',ds:'+5% 치명피해'},
     spd:{lv:0,g:.05,cost:80,cm:1.3,ic:'SPD',nm:'공격속도',ds:'+5% 속도'},
@@ -850,10 +981,10 @@ function drawStageBanner(t){
 // COMBAT
 // ============================================
 function stageMult(){
-  // E9: Exponential after stage 3
-  let linear=1+(G.stage-1)*0.5+(G.sub-1)*0.08;
+  // E9: Exponential after stage 3 (rebalanced)
+  let linear=1+(G.stage-1)*0.6+(G.sub-1)*0.15;
   let idx=(G.stage-1)*10+(G.sub-1);
-  let expo=Math.pow(1.06,idx);
+  let expo=Math.pow(1.07,idx);
   if(G.stage>=3)return Math.max(linear,expo);
   return linear;
 }
@@ -865,8 +996,8 @@ function awMult(stat){
 
 function recalcStats(){
   let t=G.tr;
-  let lvBonus_atk=(G.p.lv-1)*2;
-  let lvBonus_hp=(G.p.lv-1)*15;
+  let lvBonus_atk=(G.p.lv-1)*3;
+  let lvBonus_hp=(G.p.lv-1)*20;
   let baseAtk=10+t.atk.lv*t.atk.g+lvBonus_atk;
   let baseHp=100+t.hp.lv*t.hp.g+lvBonus_hp;
   let baseDef=2+t.def.lv*t.def.g;
@@ -886,14 +1017,14 @@ function spawnEnemy(){
   let boss=G.sub%10===0;
   let m=stageMult();
   let mt=MON[Math.floor(Math.random()*MON.length)];
-  let hp=Math.floor(50*m*(boss?5:1));
-  let atk=Math.floor(5*m*(boss?2:1));
+  let hp=Math.floor(150*m*(boss?8:1));
+  let atk=Math.floor(8*m*(boss?3:1));
   // E1: recalculate enemy x relative to canvas width every spawn
   G.e={
     x:W*0.72,y:H-35,
-    hp,mhp:hp,atk,def:Math.floor(m),
-    gold:Math.floor(10*m*(boss?10:1)),
-    exp:Math.floor(15*m*(boss?5:1)),
+    hp,mhp:hp,atk,def:Math.floor(3*m),
+    gold:Math.floor(15*m*(boss?10:1)),
+    exp:Math.floor(20*m*(boss?5:1)),
     mtype:mt,boss,hitT:0,atkT:0,
     dying:false,dyingT:0
   };
@@ -1718,13 +1849,13 @@ function spawnDungeonEnemy(){
   let m=stageMult()*(G.dungeonActive==='boss'?(2+G.dung.bossHighest):1.5);
   let mt=MON[Math.floor(Math.random()*MON.length)];
   let isBoss=G.dungeonActive==='boss';
-  let hp=Math.floor(50*m*(isBoss?8:1));
-  let atk=Math.floor(5*m*(isBoss?3:1));
+  let hp=Math.floor(150*m*(isBoss?10:1));
+  let atk=Math.floor(8*m*(isBoss?4:1));
   G.e={
     x:W*0.72,y:H-35,
-    hp,mhp:hp,atk,def:Math.floor(m),
-    gold:Math.floor(10*m*(G.dungeonActive==='gold'?10:1)),
-    exp:Math.floor(15*m),
+    hp,mhp:hp,atk,def:Math.floor(3*m),
+    gold:Math.floor(15*m*(G.dungeonActive==='gold'?10:1)),
+    exp:Math.floor(20*m),
     mtype:mt,boss:isBoss,hitT:0,atkT:0,dying:false,dyingT:0
   };
 }
@@ -1985,6 +2116,21 @@ function rSettings(){
   h+='<div class="sr"><span class="sl">총 킬</span><span class="sv">'+fmt(G.stats.totalKills)+'</span></div>';
   h+='<div class="sr"><span class="sl">최고 콤보</span><span class="sv">'+G.stats.highestCombo+'</span></div>';
 
+  // Account info
+  h+='<div style="font-size:12px;color:#ffd700;margin:8px 0 4px;padding:4px;border-bottom:1px solid #333">계정</div>';
+  if(currentUser&&!isGuest){
+    h+='<div class="userInfo">';
+    if(currentUser.photoURL)h+='<img src="'+currentUser.photoURL+'" referrerpolicy="no-referrer">';
+    h+='<div><div class="uname">'+(currentUser.displayName||'User')+'</div>';
+    h+='<div class="uemail">'+(currentUser.email||'')+'</div>';
+    h+='<div class="cloudSync">☁️ 클라우드 저장 활성</div></div></div>';
+    h+='<div class="urow"><div class="uinf"><div class="n">클라우드 저장</div><div class="d">지금 서버에 저장</div></div><button class="ubtn" onclick="save();cloudSave();showPop(\'클라우드\',\'저장 완료!\')">저장</button></div>';
+    h+='<div class="urow"><div class="uinf"><div class="n">클라우드 불러오기</div><div class="d">서버에서 불러오기</div></div><button class="ubtn" onclick="cloudLoad().then(()=>{load();recalcStats();G.p.hp=G.p.mhp;showPop(\'클라우드\',\'불러오기 완료!\')})">불러오기</button></div>';
+    h+='<div class="urow"><div class="uinf"><div class="n" style="color:#f94">로그아웃</div></div><button class="ubtn" style="background:linear-gradient(135deg,#944,#622)" onclick="logout()">로그아웃</button></div>';
+  }else{
+    h+='<div class="urow"><div class="uinf"><div class="n">게스트 모드</div><div class="d">로그인하면 클라우드 저장 가능</div></div><button class="ubtn" onclick="logout()">로그인</button></div>';
+  }
+
   h+='<div style="font-size:12px;color:#ffd700;margin:8px 0 4px;padding:4px;border-top:1px solid #333">설정</div>';
   h+='<div class="urow" onclick="toggleSound()"><div class="uinf"><div class="n">사운드</div></div><div style="color:'+(G.soundOn?'#5deb5d':'#f44')+';font-size:12px">'+(G.soundOn?'ON':'OFF')+'</div></div>';
   h+='<div class="urow" onclick="toggleDmgNum()"><div class="uinf"><div class="n">데미지 숫자</div></div><div style="color:'+(G.dmgNumOn?'#5deb5d':'#f44')+';font-size:12px">'+(G.dmgNumOn?'ON':'OFF')+'</div></div>';
@@ -2095,6 +2241,10 @@ function save(){
   Object.entries(G.tr).forEach(([k,v])=>d.tr[k]={lv:v.lv});
   try{localStorage.setItem('sb3',JSON.stringify(d));
   localStorage.setItem('sb3_t',Date.now()+'');}catch(e){}
+  // Cloud sync every 60s
+  if(!save._lastCloud||Date.now()-save._lastCloud>60000){
+    save._lastCloud=Date.now();cloudSave();
+  }
 }
 
 function load(){
@@ -2153,11 +2303,11 @@ function checkIdle(){
 
   // Calculate offline rewards
   let m=stageMult();
-  let avgEnemyHP=50*m;
+  let avgEnemyHP=150*m;
   let killsPerSec=Math.max(0.1,G.p.atk/avgEnemyHP);
   let totalOfflineKills=Math.floor(killsPerSec*elapsed);
-  let goldPerKill=Math.floor(10*m*awMult('gold'));
-  let expPerKill=Math.floor(15*m*awMult('exp'));
+  let goldPerKill=Math.floor(15*m*awMult('gold'));
+  let expPerKill=Math.floor(20*m*awMult('exp'));
   let goldEarned=totalOfflineKills*goldPerKill;
   let expEarned=totalOfflineKills*expPerKill;
   let gemsEarned=Math.floor(elapsed/600);
@@ -2213,7 +2363,7 @@ function checkIdle(){
 // Passive income
 setInterval(()=>{G.gems+=1},60000);
 setInterval(()=>{
-  let earned=Math.floor(2*stageMult()*awMult('gold'));
+  let earned=Math.floor(3*stageMult()*awMult('gold'));
   G.gold+=earned;G.stats.totalGoldEarned+=earned;
 },1000);
 
@@ -2239,19 +2389,19 @@ document.addEventListener('visibilitychange',()=>{
 // ============================================
 // INIT
 // ============================================
-load();checkIdle();recalcStats();G.p.hp=G.p.mhp;
+// Init is now handled by startGame() after login
+window.addEventListener('beforeunload',()=>{save();cloudSave();});
 
-// Initialize daily quests date
-let today=new Date().toDateString();
-if(G.quests.date!==today){G.quests={kills:0,trains:0,dungeon:0,date:today};G.questsClaimed={}}
-
-let ab=document.getElementById('autoBtn');
-ab.textContent=G.auto?'AUTO':'MANUAL';
-ab.classList.toggle('off',!G.auto);
-rTrain();
-requestAnimationFrame(loop);
-setInterval(periodicRefresh,500);
-window.addEventListener('beforeunload',save);
+// Auto-login if already signed in
+if(fbAuth){
+  fbAuth.onAuthStateChanged(async(user)=>{
+    if(user){
+      currentUser=user;isGuest=false;
+      await cloudLoad();
+      startGame();
+    }
+  });
+}
 </script>
 </body>
 </html>
